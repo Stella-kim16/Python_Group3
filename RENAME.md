@@ -1,4 +1,4 @@
-# Compact Python Programming Course # 
+# Python Programming Course # 
 
 ## Title: AI-powered smart energy management system
 
