@@ -72,3 +72,8 @@ Thumbs.db
 # Project-specific outputs, trained models, or local databases
 *.pkl
 *.db
+__pycache__/
+*.pyc
+.venv/
+*.pkl
+*.db
