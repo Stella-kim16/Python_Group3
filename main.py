@@ -1,58 +1,128 @@
+"""Unified Main Orchestration Script for Energy Management System.
+
+Integrates:
+- Subsystem 1: Event-Driven Stream Processing (ABCs, Polymorphism, Operator Overloading, Iterators/Generators),
+  Ingestion, Feature Engineering, Metrics Calculation, & SQLite Storage
+- Subsystem 2: Machine Learning (Random Forest), Demand Forecasting, Savings Advisor, & Sustainability Scoring
+"""
+
+from pathlib import Path
 import pandas as pd
 
-from source.Data_processor import CSV_PATH, load_clean_data
-from source.AI_model import AImodel
-from source.Demandforecast import DemandForecaster
-from source.AI_sustainablity import SustainabilityScorer
-from source.AI_savingadviser import SavingsAdvisor,HVACOffWhenEmpty
-from source.Prediction_result import PredictionResult
-from source.Model_evaluation import ModelEvaluator 
+# Import Subsystem 1 modules
+from subsystem1 import (
+    DEFAULT_BUILDING_CATALOG,
+    DatabaseManager,
+    DataIngestionEngine,
+    FeatureEngineer,
+    LoadBalanceAndTariffTransformer,
+    MetricsCalculator,
+    SmartMeterStream,
+    SubThresholdMeterFilter,
+)
+
+# Import Subsystem 2 modules
+from subsystem2.Data_processor import load_clean_data
+from subsystem2.AI_model import AImodel
+from subsystem2.Demandforecast import DemandForecaster
+from subsystem2.AI_savingadviser import SavingsAdvisor
+from subsystem2.AI_sustainablity import SustainabilityScorer
 
 
-raw_df = pd.read_csv(CSV_PATH)               
-clean_df = load_clean_data()                   
+def run_complete_energy_system(
+    raw_csv_path: str | Path = "data/raw/Energy_consumption.csv",
+    db_path: str | Path = "data/processed/smart_energy.db",
+    processed_csv_path: str | Path = "data/processed/enriched_energy_data.csv",
+    processed_json_path: str | Path = "data/processed/enriched_energy_data.json",
+):
+    print("=" * 80)
+    print("STARTING INTEGRATED ENERGY MANAGEMENT SYSTEM PIPELINE")
+    print("=" * 80)
+
+    # ==========================================
+    # SUBSYSTEM 1: Event-Driven Stream Processing & Batch Pipeline
+    # ==========================================
+    print("\n[Step 1/5] Running Subsystem 1: Event-Driven Stream Processing & Data Management...")
+
+    meter_filter = SubThresholdMeterFilter(min_power_kwh=30.0, drop_inactive=True)
+    engineer = FeatureEngineer(buildings=DEFAULT_BUILDING_CATALOG, random_seed=42)
+    transformer = LoadBalanceAndTariffTransformer()
+
+    stream_pipeline = meter_filter + engineer + transformer
+    iot_stream = SmartMeterStream(raw_csv_path)
+    streamed_events = list(stream_pipeline.process_stream(iot_stream))
+    print(
+        f"  -> Real-Time IoT Stream Pipeline processed {len(streamed_events)} active above-threshold events "
+        f"(composed via `+` operator overloading & consumed via `__iter__`/`__next__`)."
+    )
+
+    ingestion = DataIngestionEngine(raw_csv_path)
+    calculator = MetricsCalculator()
+    batch_pipeline = ingestion | engineer | calculator
+    enriched_df = batch_pipeline.process(raw_csv_path)
+
+    db = DatabaseManager(connection_string=db_path)
+    db.save_buildings(DEFAULT_BUILDING_CATALOG)
+    db.save_energy_logs_df(enriched_df)
+    db.export_to_csv(processed_csv_path)
+    db.export_to_json(processed_json_path)
+    print(f"  -> Subsystem 1 complete. Enriched data saved to: {processed_csv_path}")
+
+    # ==========================================
+    # SUBSYSTEM 2: AI Modeling & Forecasting
+    # ==========================================
+    print("\n[Step 2/5] Training Subsystem 2: Random Forest AI Model...")
+
+    # Load fully processed clean data for modeling
+    clean_df = load_clean_data(processed_csv_path)
+    raw_df = pd.read_csv(processed_csv_path)
+
+    # Train Random Forest Regressor
+    model = AImodel(n_estimators=200, random_state=42)
+    model.train(clean_df)
+    model.save("trained_energy_model.pkl")
+    print("  -> AI Model successfully trained and saved as 'trained_energy_model.pkl'.")
+
+    # ==========================================
+    # SUBSYSTEM 2: Demand Forecasting
+    # ==========================================
+    print("\n[Step 3/5] Running Next 24-Hour Demand Forecast...")
+    forecaster = DemandForecaster(model, raw_df)
+    forecast_results = forecaster.forecast_all()
+
+    print("\n--- 24-Hour Forecast Summary ---")
+    for bld_id, res in forecast_results.items():
+        print(f"  Building {bld_id:12s} | 24h Total: {res.total_kwh:8.2f} kWh | Estimated Cost: EUR {res.total_cost_eur:6.2f}")
+
+    # ==========================================
+    # SUBSYSTEM 2: Savings Advisor
+    # ==========================================
+    print("\n[Step 4/5] Evaluating Energy Savings Recommendations...")
+    advisor = SavingsAdvisor(model, raw_df)
+    recommendations = advisor.recommend_all()
+
+    print("\n--- Top Saving Opportunities ---")
+    for bld_id, recs in recommendations.items():
+        if recs:
+            print(f"  Building: {bld_id}")
+            for rec in recs:
+                print(f"    * [{rec.title}] Wasted Hours: {rec.wasted_hours}h | Save: ~EUR {rec.saved_eur_per_month:.2f}/month")
+
+    # ==========================================
+    # SUBSYSTEM 2: Sustainability Scoring
+    # ==========================================
+    print("\n[Step 5/5] Calculating Building Sustainability Scores...")
+    scorer = SustainabilityScorer(model, raw_df)
+    scores = scorer.score_all()
+
+    print("\n--- Sustainability Score Summary (0-100) ---")
+    for bld_id, score_res in scores.items():
+        print(f"  Building {bld_id:12s} | Total Score: {score_res.total_score:5.1f}/100 | Efficiency: {score_res.efficiency_score:5.1f}/100 | Sub-scores: {score_res.sub_scores}")
+
+    print("\n" + "=" * 80)
+    print("INTEGRATED PIPELINE COMPLETED SUCCESSFULLY!")
+    print("=" * 80)
 
 
-model = AImodel().train(clean_df)
-
-
-forecaster = DemandForecaster(model, raw_df)
-forecasts = forecaster.forecast_all()         
-
-result = forecasts["BLD_OFF_01"]
-print(f"\n{result.building_id} next 24 hours: {result.total_kwh} kWh, {result.total_cost_eur} €")
-print(result.hourly.round(2).head(6))
-
-print("================================")
-print("\n[Sustainability Score]")
-scorer = SustainabilityScorer(model, raw_df)
-scores = scorer.score_all()                    
-
-s = scores["BLD_OFF_01"]
-print(f"\n{s.building_id} ({s.building_type}): {s.total_score}/100, "
-      f"Current Efficiency {s.efficiency_score}/100")
-print(s.details)
-
-
-print("\n[Savings]")
-advisor = SavingsAdvisor(model, raw_df)
-tips = advisor.recommend_all()                
-for tip in tips["BLD_OFF_01"]:
-    print(f"\n  {tip.title}")
-    print(f"  {tip.message}")
-    print(f"  wasted hours: {tip.wasted_hours}, saved: {tip.saved_kwh} kWh / {tip.saved_eur} € "
-          f"in data period, {tip.saved_eur_per_month} € per month ({tip.saved_pct} %)")
- 
-
-hvac = advisor.evaluate("BLD_UNI_02", HVACOffWhenEmpty())
-print(f"\n  {hvac.building_id}: {hvac.message}")
-
-
-
-print("\n[Model Evaluation]")
-test_time = pd.to_datetime(raw_df.loc[model.X_test.index, "Timestamp"])   
-rf_result = PredictionResult.from_series(
-    "Random Forest", model.predict(model.X_test), model.y_test, timestamps=test_time)
-
-evaluator = ModelEvaluator()
-print(evaluator.evaluate(rf_result))
+if __name__ == "__main__":
+    run_complete_energy_system()
