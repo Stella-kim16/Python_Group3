@@ -2,12 +2,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-# "이렇게 바꾸면 얼마를 아낄 수 있다" 를 계산하는 파트
-# 계산 원리:
-#   1) 과거 데이터에서 낭비 조건에 맞는 시간을 찾는다 (예: 사람 0명 + HVAC On)
-#   2) AIforecast 에 두 번 묻는다 — 그대로 / 그 시간만 기기를 끈 상태
-#   3) 차이 = 아낄 수 있는 kWh → × 그 시간 단가 = €
-#   4) 데이터 기간의 절약액을 하루 평균으로 바꾼 뒤 한 달로 환산
+# Calculating savings part 
 
 BUILDING_PREFIX = "Bld_"
 DAYS_PER_MONTH = 30
@@ -19,21 +14,20 @@ TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 class Recommendation:
     """One saving tip for one building, with the money behind it."""
     building_id: str
-    title: str                    # 예: "Switch off HVAC in empty rooms"
-    message: str                  # 사용자에게 보여줄 문장
-    wasted_hours: int             # 데이터 기간 중 낭비 조건에 해당한 시간 수
-    saved_kwh: float              # 데이터 기간 동안 아낄 수 있었던 kWh
-    saved_eur: float              # 데이터 기간 동안 아낄 수 있었던 €
-    saved_eur_per_month: float    # 한 달(30일) 환산 절약액
-    saved_pct: float              # 이 빌딩 전체 비용 대비 %
+    title: str                   
+    message: str                 
+    wasted_hours: int             
+    saved_kwh: float              
+    saved_eur: float              
+    saved_eur_per_month: float    
+    saved_pct: float              
 
 
-# ---------------------------------------------------------------
-# 시나리오: 부모 클래스 — 모든 절약 방법이 같은 형태를 가짐
-# ---------------------------------------------------------------
+
+# Base prediction 
 class SavingScenario:
     title = "Base scenario"
-    switch_off: list[str] = []          # 끌 기기 컬럼
+    switch_off: list[str] = []          
 
     def waste_mask(self, X: pd.DataFrame) -> pd.Series:
         """True for hours where energy is wasted. Child classes define the condition."""
@@ -50,9 +44,7 @@ class SavingScenario:
         return f"{self.title}: save about {saved_eur_per_month:.2f} € per month."
 
 
-# ---------------------------------------------------------------
-# 시나리오: 자식 클래스 — 조건만 다르게
-# ---------------------------------------------------------------
+# Hvac condition has changed 
 class HVACOffWhenEmpty(SavingScenario):
     """Nobody in the room but the HVAC is on → switch the HVAC off."""
     title = "Switch off HVAC in empty rooms"
@@ -66,6 +58,7 @@ class HVACOffWhenEmpty(SavingScenario):
                 f"Switching it off saves about {saved_eur_per_month:.2f} € per month.")
 
 
+# Lightoff condition has changed 
 class LightsOffWhenEmpty(SavingScenario):
     """Nobody in the room but the lights are on → switch the lights off."""
     title = "Switch off lights in empty rooms"
@@ -79,9 +72,7 @@ class LightsOffWhenEmpty(SavingScenario):
                 f"Switching them off saves about {saved_eur_per_month:.2f} € per month.")
 
 
-# ---------------------------------------------------------------
-# 절약액 계산기
-# ---------------------------------------------------------------
+ # Calculator 
 class SavingsAdvisor:
     """Estimate how much money each saving scenario would save per building."""
 
@@ -110,29 +101,27 @@ class SavingsAdvisor:
     def buildings(self) -> list[str]:
         return sorted(c[len(BUILDING_PREFIX):] for c in self.building_cols)
 
-    # -----------------------------------------------------------
-    # 시나리오 하나 × 빌딩 하나
-    # -----------------------------------------------------------
+    
     def evaluate(self, building_id: str, scenario: SavingScenario) -> Recommendation:
         bld_col = f"{BUILDING_PREFIX}{building_id}"
         if bld_col not in self.building_cols:
             raise ValueError(f"Unknown building '{building_id}'. Available: {self.buildings()}")
 
-        # 1) 이 빌딩의 과거 입력
+        
         hist = self.history_X[self.history_X[bld_col] == 1]
         price = self.price.loc[hist.index]
 
-        # 2) 그대로 / 기기를 끈 상태 — 두 번 예측
+       
         base_kwh = self.model.predict(hist)
         changed_X, mask = scenario.apply(hist)
         new_kwh = self.model.predict(changed_X)
 
-        # 3) 차이 = 아낄 수 있는 kWh → 단가를 곱해서 €
-        saved_kwh = (base_kwh - new_kwh).clip(lower=0)     # 오히려 늘어나는 경우는 0 으로
+        
+        saved_kwh = (base_kwh - new_kwh).clip(lower=0)     
         saved_eur = float((saved_kwh * price).sum())
         base_eur = float((base_kwh * price).sum())
 
-        # 4) 한 달 환산
+        
         per_month = saved_eur / self.n_days * DAYS_PER_MONTH
         wasted_hours = int(mask.sum())
 
@@ -147,17 +136,12 @@ class SavingsAdvisor:
             saved_pct=round(100 * saved_eur / base_eur, 2) if base_eur else 0.0,
         )
 
-    # -----------------------------------------------------------
-    # 빌딩 하나의 추천 목록 (절약액 큰 순서, 0 € 인 것은 제외)
-    # -----------------------------------------------------------
+
     def recommend(self, building_id: str) -> list[Recommendation]:
         recs = [self.evaluate(building_id, s) for s in self.scenarios]
         recs = [r for r in recs if r.wasted_hours > 0]
         return sorted(recs, key=lambda r: r.saved_eur_per_month, reverse=True)
 
-    # -----------------------------------------------------------
-    # 빌딩 전체
-    # -----------------------------------------------------------
     def recommend_all(self) -> dict[str, list[Recommendation]]:
         """{building_id: [Recommendation, ...]} for every building."""
         results = {}
