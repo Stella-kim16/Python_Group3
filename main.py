@@ -1,7 +1,8 @@
 """Unified Main Orchestration Script for Energy Management System.
 
 Integrates:
-- Subsystem 1: Ingestion, Feature Engineering, Metrics Calculation, & SQLite Storage
+- Subsystem 1: Event-Driven Stream Processing (ABCs, Polymorphism, Operator Overloading, Iterators/Generators),
+  Ingestion, Feature Engineering, Metrics Calculation, & SQLite Storage
 - Subsystem 2: Machine Learning (Random Forest), Demand Forecasting, Savings Advisor, & Sustainability Scoring
 """
 
@@ -14,7 +15,10 @@ from subsystem1 import (
     DatabaseManager,
     DataIngestionEngine,
     FeatureEngineer,
+    LoadBalanceAndTariffTransformer,
     MetricsCalculator,
+    SmartMeterStream,
+    SubThresholdMeterFilter,
 )
 
 # Import Subsystem 2 modules
@@ -36,23 +40,27 @@ def run_complete_energy_system(
     print("=" * 80)
 
     # ==========================================
-    # SUBSYSTEM 1: Ingestion & Feature Engineering
+    # SUBSYSTEM 1: Event-Driven Stream Processing & Batch Pipeline
     # ==========================================
-    print("\n[Step 1/5] Running Subsystem 1: Data Ingestion & Feature Engineering...")
-    
-    # 1. Ingest raw CSV data
-    ingestion = DataIngestionEngine(raw_csv_path)
-    clean_raw_df = ingestion.import_csv_batch()
+    print("\n[Step 1/5] Running Subsystem 1: Event-Driven Stream Processing & Data Management...")
 
-    # 2. Engineer features (building assignments, schedules, occupancy rules)
+    meter_filter = SubThresholdMeterFilter(min_power_kwh=30.0, drop_inactive=True)
     engineer = FeatureEngineer(buildings=DEFAULT_BUILDING_CATALOG, random_seed=42)
-    engineered_df = engineer.run_pipeline(clean_raw_df)
+    transformer = LoadBalanceAndTariffTransformer()
 
-    # 3. Calculate financial, carbon, and anomaly metrics
+    stream_pipeline = meter_filter + engineer + transformer
+    iot_stream = SmartMeterStream(raw_csv_path)
+    streamed_events = list(stream_pipeline.process_stream(iot_stream))
+    print(
+        f"  -> Real-Time IoT Stream Pipeline processed {len(streamed_events)} active above-threshold events "
+        f"(composed via `+` operator overloading & consumed via `__iter__`/`__next__`)."
+    )
+
+    ingestion = DataIngestionEngine(raw_csv_path)
     calculator = MetricsCalculator()
-    enriched_df = calculator.enrich_metrics(engineered_df)
+    batch_pipeline = ingestion | engineer | calculator
+    enriched_df = batch_pipeline.process(raw_csv_path)
 
-    # 4. Save to database and export processed datasets
     db = DatabaseManager(connection_string=db_path)
     db.save_buildings(DEFAULT_BUILDING_CATALOG)
     db.save_energy_logs_df(enriched_df)
@@ -64,7 +72,7 @@ def run_complete_energy_system(
     # SUBSYSTEM 2: AI Modeling & Forecasting
     # ==========================================
     print("\n[Step 2/5] Training Subsystem 2: Random Forest AI Model...")
-    
+
     # Load fully processed clean data for modeling
     clean_df = load_clean_data(processed_csv_path)
     raw_df = pd.read_csv(processed_csv_path)
