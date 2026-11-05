@@ -1,13 +1,20 @@
-"""Metrics Calculator for energy cost, carbon footprint, anomaly detection, and sustainability scoring."""
+"""Metrics Calculator and Stream Transformer for energy cost, carbon footprint, and anomaly detection."""
 
 from datetime import datetime
-from typing import Dict, Union
+from typing import Any, Dict, Union
 import numpy as np
 import pandas as pd
+from subsystem1.models import EnergyLog, StreamProcessor
 
 
-class MetricsCalculator:
-    """Computes financial costs, carbon emissions, anomaly flags, and sustainability scores."""
+class MetricsCalculator(StreamProcessor):
+    """
+    Computes financial costs (peak/off-peak tariff), carbon emissions,
+    anomaly flags, and sustainability scores using the existing CSV/DB columns.
+
+    Inherits from `StreamProcessor` (ABC) to support polymorphic stream and batch
+    transformations (Pipeline Goal 2).
+    """
 
     def __init__(
         self,
@@ -18,6 +25,68 @@ class MetricsCalculator:
         self.emission_factor = emission_factor
         self.peak_tariff = peak_tariff
         self.off_peak_tariff = off_peak_tariff
+
+    def is_peak_tariff(
+        self, timestamp: Union[datetime, pd.Timestamp, str], holiday: str = "No"
+    ) -> bool:
+        """Determine whether a timestamp falls within peak-tariff hours (weekday 08:00-20:00, non-holiday)."""
+        ts = pd.to_datetime(timestamp)
+        is_weekend = ts.weekday() >= 5
+        if is_weekend or str(holiday).strip().title() == "Yes":
+            return False
+        return bool(8 <= ts.hour < 20)
+
+    def process(
+        self, data: Union[Dict[str, Any], EnergyLog, pd.DataFrame, None]
+    ) -> Union[Dict[str, Any], EnergyLog, pd.DataFrame, None]:
+        """
+        Polymorphic `StreamProcessor.process` implementation (Pipeline Goal 2):
+        Transforms valid energy metrics into updated tariff rates (`cost_per_kwh`),
+        costs (`energy_cost_eur`), carbon equivalents (`carbon_footprint_kg`),
+        and anomaly flags (`is_anomaly`) using only existing CSV/DB schema fields.
+        """
+        if data is None:
+            return None
+
+        if isinstance(data, pd.DataFrame):
+            return self.enrich_metrics(data)
+
+        if isinstance(data, EnergyLog):
+            data.energy_cost_eur = self.calculate_energy_cost(
+                data.energy_consumption_kwh, data.timestamp, holiday=data.holiday
+            )
+            data.carbon_footprint_kg = self.calculate_carbon_emission(
+                data.energy_consumption_kwh, data.renewable_energy_pct
+            )
+            data.is_anomaly = bool(
+                (data.occupancy == 0 and data.hvac_usage == "On" and data.lighting_usage == "On")
+                or data.energy_consumption_kwh > 95.0
+            )
+            return data
+
+        if isinstance(data, dict):
+            event = dict(data)
+            ts = pd.to_datetime(event.get("Timestamp", event.get("timestamp", datetime.now())))
+            holiday = str(event.get("Holiday", event.get("holiday", "No"))).strip().title()
+            kwh = float(event.get("EnergyConsumption", event.get("energy_consumption_kwh", 0.0)))
+            ren_pct = float(event.get("RenewableEnergy", event.get("renewable_energy_pct", 0.0)))
+
+            rate = self.get_tariff_rate(ts, holiday=holiday)
+            cost_eur = round(kwh * rate, 4)
+            carbon_kg = self.calculate_carbon_emission(kwh, ren_pct)
+
+            occ = int(event.get("Occupancy", event.get("occupancy", 0)))
+            hvac = str(event.get("HVACUsage", event.get("hvac_usage", "Off")))
+            light = str(event.get("LightingUsage", event.get("lighting_usage", "Off")))
+            is_anom = bool((occ == 0 and hvac == "On" and light == "On") or kwh > 95.0)
+
+            event["cost_per_kwh"] = rate
+            event["energy_cost_eur"] = cost_eur
+            event["carbon_footprint_kg"] = carbon_kg
+            event["is_anomaly"] = is_anom
+            return event
+
+        raise TypeError(f"Unsupported input type for MetricsCalculator.process: {type(data)}")
 
     def estimate_kwh(
         self,
@@ -40,11 +109,7 @@ class MetricsCalculator:
 
     def get_tariff_rate(self, timestamp: Union[datetime, pd.Timestamp], holiday: str = "No") -> float:
         """Return dynamic tariff rate (EUR/kWh) based on time-of-use and weekday/weekend schedule."""
-        ts = pd.to_datetime(timestamp)
-        is_weekend = ts.weekday() >= 5
-        if is_weekend or holiday == "Yes":
-            return self.off_peak_tariff
-        if 8 <= ts.hour < 20:
+        if self.is_peak_tariff(timestamp, holiday=holiday):
             return self.peak_tariff
         return self.off_peak_tariff
 
@@ -126,3 +191,12 @@ class MetricsCalculator:
 
             scores[str(bid)] = round(ren_score + discipline_score + carbon_score, 1)
         return scores
+
+
+class LoadBalanceAndTariffTransformer(MetricsCalculator):
+    """
+    Specialized StreamProcessor subclass dedicated to transforming valid smart meter
+    events into updated tariff rates, energy costs, carbon equivalents, and anomaly flags.
+    """
+
+    pass
