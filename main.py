@@ -35,26 +35,20 @@ def run_complete_energy_system(
     processed_csv_path: str | Path = "data/processed/enriched_energy_data.csv",
     processed_json_path: str | Path = "data/processed/enriched_energy_data.json",
 ):
-    print("=" * 80)
-    print("STARTING INTEGRATED ENERGY MANAGEMENT SYSTEM PIPELINE")
-    print("=" * 80)
+    
 
     # ==========================================
     # SUBSYSTEM 1: Event-Driven Stream Processing & Batch Pipeline
     # ==========================================
     print("\n[Step 1/5] Running Subsystem 1: Event-Driven Stream Processing & Data Management...")
 
-    meter_filter = SubThresholdMeterFilter(min_power_kwh=30.0, drop_inactive=True)
+    meter_filter = SubThresholdMeterFilter(min_power_kwh=65.0)
     engineer = FeatureEngineer(buildings=DEFAULT_BUILDING_CATALOG, random_seed=42)
     transformer = LoadBalanceAndTariffTransformer()
 
     stream_pipeline = meter_filter + engineer + transformer
     iot_stream = SmartMeterStream(raw_csv_path)
     streamed_events = list(stream_pipeline.process_stream(iot_stream))
-    print(
-        f"  -> Real-Time IoT Stream Pipeline processed {len(streamed_events)} active above-threshold events "
-        f"(composed via `+` operator overloading & consumed via `__iter__`/`__next__`)."
-    )
 
     ingestion = DataIngestionEngine(raw_csv_path)
     calculator = MetricsCalculator()
