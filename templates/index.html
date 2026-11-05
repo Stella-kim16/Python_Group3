@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Smart Energy Data</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; }
+    .cols { display: flex; gap: 60px; }
+    .added { color: #c0392b; font-weight: bold; }
+    table { border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #ccc; padding: 4px 8px; }
+    th { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <h1>Smart Energy Data: Input vs Output</h1>
+
+  <h2>1. Columns</h2>
+  <div class="cols">
+    <div>
+      <h3>Input ({{ raw_cols|length }} columns)</h3>
+      <ul>{% for c in raw_cols %}<li>{{ c }}</li>{% endfor %}</ul>
+    </div>
+    <div>
+      <h3>Output ({{ logs_cols|length }} columns)</h3>
+      <ul>
+        {% for c in logs_cols %}
+          <li class="{{ 'added' if c in added_cols }}">{{ c }}{% if c in added_cols %} (new){% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <p><b>Added columns:</b> {{ added_cols | join(", ") }}</p>
+  {% if removed_cols %}<p><b>Removed columns:</b> {{ removed_cols | join(", ") }}</p>{% endif %}
+
+  <h2>2. EnergyConsumption: Before vs After</h2>
+  <p>{{ changed_count }} of {{ matched_count }} matched rows have a different EnergyConsumption value.</p>
+  {{ compare_table | safe }}
+</body>
+</html>

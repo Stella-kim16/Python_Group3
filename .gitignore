@@ -1,0 +1,5 @@
+.env
+.venv/
+__pycache__/
+
+# ignore thoes of files then will not show private info e.g ) password of sql
