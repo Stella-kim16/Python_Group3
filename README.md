@@ -1,7 +1,7 @@
 # Smart Energy Data Viewer (Flask + MySQL)
 
 ## Author
-- Team: Python Group 3
+- Team: Python Group 6
 - Name: Ecesu Yildiran [ESE 7226935], Stella (Sung Eun Kim) [ESE 7226046],Devashish Deshpande [ESE 7225975] 
 
 ## Project Description
