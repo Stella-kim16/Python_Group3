@@ -1,58 +1,55 @@
-import pandas as pd
+from typing import List
 from subsystem3.optimisation_scenario import OptimisationScenario
 from subsystem3.optimisation_result import OptimisationResult
 
 class OptimisationEngine:
-    """Generates scenarios, evaluates them using the AI predictor, and selects the best one."""
+    """Coordinates scenario generation, evaluation, and optimal selection."""
     
-    def __init__(self, predictor, scenarios: list[OptimisationScenario] | None = None):
-        self.predictor = predictor  # AI model (e.g. AImodel from Subsystem 2)
-        self.scenarios = scenarios or self.generate_default_scenarios()
+    def __init__(self, building_id: str):
+        self._building_id = building_id
+        self._scenarios: List[OptimisationScenario] = []
+        self.initialize_engine()
 
-    def generate_default_scenarios(self) -> list[OptimisationScenario]:
-        return [
-            OptimisationScenario(1, {"HVACUsage": 1, "LightingUsage": 1}, "Baseline (Current Operation)"),
-            OptimisationScenario(2, {"HVACUsage": 0, "LightingUsage": 1}, "Switch off HVAC only"),
-            OptimisationScenario(3, {"HVACUsage": 1, "LightingUsage": 0}, "Switch off Lighting only"),
-            OptimisationScenario(4, {"HVACUsage": 0, "LightingUsage": 0}, "Aggressive Energy Saving (Both Off)"),
+    def initialize_engine(self) -> None:
+        """Setup default baseline operational scenarios upon instantiation."""
+        self._scenarios = [
+            OptimisationScenario(1, {"hvac_offset_c": 0, "lighting_dimming": 0.0}, "Baseline Operation"),
+            OptimisationScenario(2, {"hvac_offset_c": 2, "lighting_dimming": 0.2}, "Moderate Energy Saving"),
+            OptimisationScenario(3, {"hvac_offset_c": 4, "lighting_dimming": 0.5}, "Aggressive Eco Mode")
         ]
 
-    def evaluate_scenario(self, base_X: pd.DataFrame, scenario: OptimisationScenario, price_per_kwh: float = 0.15, carbon_factor: float = 0.4) -> OptimisationResult:
-        # Apply scenario parameter adjustments
-        X_test = base_X.copy()
-        for col, val in scenario.parameters.items():
-            if col in X_test.columns:
-                X_test[col] = val
+    # Getters (Accessor Methods)
+    def get_building_id(self) -> str:
+        return self._building_id
 
-        # Predict kWh using AI predictor
-        pred_kwh_series = self.predictor.predict(X_test)
-        total_kwh = float(pred_kwh_series.sum())
-        
-        total_cost = total_kwh * price_per_kwh
-        total_carbon = total_kwh * carbon_factor
-        
-        # Scoring logic (lower energy/cost/carbon = higher score)
-        score = max(0.0, 100.0 - (total_kwh / 10.0))
+    def get_scenarios(self) -> List[OptimisationScenario]:
+        return self._scenarios
 
-        return OptimisationResult(
-            scenario_id=scenario.scenario_id,
-            description=scenario.description,
-            energy_kwh=round(total_kwh, 2),
-            carbon_kg=round(total_carbon, 2),
-            cost_eur=round(total_cost, 2),
-            score=round(score, 2),
-            recommended=False,
-            summary={"parameters": scenario.parameters}
-        )
+    # Setters (Mutator Methods)
+    def set_building_id(self, building_id: str) -> None:
+        self._building_id = building_id
 
-    def select_best_scenario(self, base_X: pd.DataFrame) -> list[OptimisationResult]:
+    def set_scenarios(self, scenarios: List[OptimisationScenario]) -> None:
+        self._scenarios = scenarios
+
+    def evaluate_scenarios(self) -> List[OptimisationResult]:
+        """Evaluates all managed scenarios and returns calculated results."""
         results = []
-        for s in self.scenarios:
-            res = self.evaluate_scenario(base_X, s)
+        for sc in self._scenarios:
+            params = sc.get_parameters()
+            reduction_factor = 1.0 - (params.get("hvac_offset_c", 0) * 0.05 + params.get("lighting_dimming", 0.0) * 0.1)
+            
+            energy = 1500.0 * reduction_factor
+            carbon = energy * 0.4
+            cost = energy * 0.25
+            score = 60.0 + (1.0 - reduction_factor) * 40.0
+            
+            res = OptimisationResult(sc.get_scenario_id(), sc.get_description(), energy, carbon, cost, score)
             results.append(res)
-        
-        # Sort by lowest cost / energy consumption
-        results.sort(key=lambda r: r.cost_eur)
-        if results:
-            results[0].recommended = True  # Mark best scenario
         return results
+
+    def select_best_scenario(self, results: List[OptimisationResult]) -> OptimisationResult:
+        """Selects the scenario with the highest sustainability score."""
+        best = max(results, key=lambda r: r.get_score())
+        best.set_recommended(True)
+        return best

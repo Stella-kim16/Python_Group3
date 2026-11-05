@@ -7,6 +7,10 @@ from subsystem2.AI_savingadviser import SavingsAdvisor
 from subsystem2.AI_sustainablity import SustainabilityScorer
 from subsystem2.Data_processor import load_clean_data
 
+# Import Subsystem 3 classes
+from subsystem3.optimisation_engine import OptimisationEngine
+from subsystem3.results_visualiser import ResultsVisualiser
+
 st.set_page_config(page_title="Smart Energy Management Dashboard", page_icon="⚡", layout="wide")
 
 st.title("⚡ AI-Powered Smart Energy Management Dashboard")
@@ -26,7 +30,16 @@ raw_df, model = load_system()
 
 # Sidebar Navigation & Filters
 st.sidebar.header("Navigation & Filters")
-app_mode = st.sidebar.radio("Go to:", ["📊 Building Overview & Forecasts", "💡 Saving Advisor", "🌱 Sustainability Scoring", "📋 Audit Reports & Export"])
+app_mode = st.sidebar.radio(
+    "Go to:", 
+    [
+        "📊 Building Overview & Forecasts", 
+        "💡 Saving Advisor", 
+        "🌱 Sustainability Scoring", 
+        "⚙️ Optimisation & Visualisation", 
+        "📋 Audit Reports & Export"
+    ]
+)
 
 building_id = st.sidebar.selectbox("Select Building", sorted(raw_df["building_id"].unique()))
 
@@ -81,6 +94,37 @@ elif app_mode == "🌱 Sustainability Scoring":
     
     st.subheader("Audit Metrics Details")
     st.json(score_res.details)
+
+elif app_mode == "⚙️ Optimisation & Visualisation":
+    st.header(f"⚙️ Subsystem 3: Operational Optimisation & Visualisation ({building_id})")
+    st.markdown("Simulate operational scenarios, evaluate energy/cost/carbon trade-offs, and render Matplotlib performance charts natively via the `ResultsVisualiser` class.")
+
+    # 1. Instantiate Optimisation Engine & Evaluate Scenarios
+    engine = OptimisationEngine(building_id=building_id)
+    results = engine.evaluate_scenarios()
+    best_scenario = engine.select_best_scenario(results)
+
+    st.success(f"✨ **Recommended Optimal Strategy:** {best_scenario.get_description()} (Score: {best_scenario.get_score()}/100)")
+
+    # Display summary table of evaluated scenarios
+    st.subheader("📋 Evaluated Optimisation Scenarios")
+    scenario_summary_df = pd.DataFrame([r.summary() for r in results])
+    st.dataframe(scenario_summary_df, use_container_width=True)
+
+    # 2. Render Matplotlib Visualisations using ResultsVisualiser class
+    st.subheader("📊 Subsystem 3 Matplotlib Visualisation Dashboard")
+    visualiser = ResultsVisualiser(title=f"Optimisation Analysis for {building_id}")
+    
+    col_v1, col_v2 = st.columns(2)
+    with col_v1:
+        st.markdown("**Energy Comparison Across Scenarios**")
+        fig_energy = visualiser.plot_energy_comparison(results)
+        st.pyplot(fig_energy)
+        
+    with col_v2:
+        st.markdown("**Operating Cost Comparison Across Scenarios**")
+        fig_cost = visualiser.plot_cost_comparison(results)
+        st.pyplot(fig_cost)
 
 elif app_mode == "📋 Audit Reports & Export":
     st.header("📋 Comprehensive Audit Reports")
