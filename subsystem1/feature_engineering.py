@@ -1,9 +1,9 @@
 """Feature Engineering and realistic building/occupancy simulation for Subsystem 1."""
 
-from typing import Dict, List
+from typing import Any, Dict, List, Union
 import numpy as np
 import pandas as pd
-from subsystem1.models import Building
+from subsystem1.models import Building, EnergyLog, StreamProcessor
 
 
 DEFAULT_BUILDING_CATALOG: List[Building] = [
@@ -16,13 +16,80 @@ DEFAULT_BUILDING_CATALOG: List[Building] = [
 ]
 
 
-class FeatureEngineer:
-    """Transforms raw energy logs into multi-building, schedule-aware telemetry."""
+class FeatureEngineer(StreamProcessor):
+    """
+    Transforms raw energy logs into multi-building, schedule-aware telemetry.
+
+    Inherits from `StreamProcessor` (ABC) to support polymorphic processing of
+    both real-time single-event dictionaries and batch DataFrames using only the
+    established CSV and database schema columns.
+    """
 
     def __init__(self, buildings: List[Building] | None = None, random_seed: int = 42) -> None:
         self.buildings = buildings or DEFAULT_BUILDING_CATALOG
         self.building_map: Dict[str, Building] = {b.building_id: b for b in self.buildings}
         self.random_seed = random_seed
+
+    def _resolve_building_for_sqft(self, sqft: float) -> Building:
+        """Map a raw SquareFootage reading to its corresponding Building instance."""
+        thresholds = [1165.0, 1330.0, 1500.0, 1665.0, 1830.0]
+        for idx, limit in enumerate(thresholds):
+            if sqft < limit and idx < len(self.buildings):
+                return self.buildings[idx]
+        return self.buildings[-1]
+
+    def process(
+        self, data: Union[Dict[str, Any], EnergyLog, pd.DataFrame, None]
+    ) -> Union[Dict[str, Any], EnergyLog, pd.DataFrame, None]:
+        """
+        Polymorphic `StreamProcessor.process` implementation:
+        - Single event (dict): assigns building metadata (`building_id`,
+          `building_type`, `max_occupancy`, `SquareFootage`) and calendar features.
+        - EnergyLog: enriches building attributes on the domain object.
+        - Batch DataFrame: executes the full feature engineering pipeline.
+        """
+        if data is None:
+            return None
+
+        if isinstance(data, pd.DataFrame):
+            return self.run_pipeline(data)
+
+        if isinstance(data, EnergyLog):
+            bld = self.building_map.get(data.building_id) or self._resolve_building_for_sqft(data.area_sqft)
+            data.building_id = bld.building_id
+            data.building_type = bld.building_type
+            data.area_sqft = bld.area_sqft
+            if data.day_of_week == "Sunday":
+                data.holiday = "Yes"
+            return data
+
+        if isinstance(data, dict):
+            event = dict(data)
+            raw_sqft = float(event.get("SquareFootage", 1400.0))
+            bld_id = event.get("building_id")
+            bld = (
+                self.building_map.get(str(bld_id))
+                if bld_id in self.building_map
+                else self._resolve_building_for_sqft(raw_sqft)
+            )
+
+            event["building_id"] = bld.building_id
+            event["building_type"] = bld.building_type
+            event["max_occupancy"] = int(bld.max_occupancy)
+            event["SquareFootage"] = float(bld.area_sqft)
+
+            day_of_week = str(event.get("DayOfWeek", "Monday")).strip().title()
+            holiday = str(event.get("Holiday", "No")).strip().title()
+            if day_of_week == "Sunday":
+                holiday = "Yes"
+            event["DayOfWeek"] = day_of_week
+            event["Holiday"] = holiday
+
+            occ = int(round(float(event.get("Occupancy", 0))))
+            event["Occupancy"] = max(0, min(occ, bld.max_occupancy))
+            return event
+
+        raise TypeError(f"Unsupported input type for FeatureEngineer.process: {type(data)}")
 
     def assign_buildings(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -78,48 +145,46 @@ class FeatureEngineer:
 
             if btype == "Office":
                 if off_day:
-                    # Very low on weekends/holidays at office buildings (0 to ~5% capacity)
                     frac = 0.0 if s < 0.65 else 0.05 * s
                 else:
                     if 9 <= hour <= 16:
-                        frac = 0.65 + 0.30 * s  # Peak office hours: 65% - 95%
+                        frac = 0.65 + 0.30 * s
                     elif hour in (8, 17):
-                        frac = 0.40 + 0.30 * s  # Arrival / departure: 40% - 70%
+                        frac = 0.40 + 0.30 * s
                     elif hour in (7, 18, 19):
-                        frac = 0.08 + 0.17 * s  # Early / late workers: 8% - 25%
+                        frac = 0.08 + 0.17 * s
                     else:
-                        frac = 0.0 if s < 0.75 else 0.03  # Night security: 0 - 1 person
+                        frac = 0.0 if s < 0.75 else 0.03
 
             elif btype == "Home":
                 if off_day:
                     if 18 <= hour <= 23 or 0 <= hour <= 8:
-                        frac = 0.80 + 0.20 * s  # Weekend evenings/nights: 80% - 100%
+                        frac = 0.80 + 0.20 * s
                     else:
-                        frac = 0.50 + 0.40 * s  # Weekend daytime: 50% - 90%
+                        frac = 0.50 + 0.40 * s
                 else:
                     if 18 <= hour <= 23:
-                        # Very high on the evenings at homes (75% - 100%)
                         frac = 0.75 + 0.25 * s
                     elif 0 <= hour <= 6:
-                        frac = 0.85 + 0.15 * s  # Sleeping hours: 85% - 100%
+                        frac = 0.85 + 0.15 * s
                     elif hour in (7, 17):
-                        frac = 0.45 + 0.35 * s  # Morning/evening transition: 45% - 80%
+                        frac = 0.45 + 0.35 * s
                     else:
-                        frac = 0.05 + 0.25 * s  # Weekday daytime: 5% - 30%
+                        frac = 0.05 + 0.25 * s
 
             else:  # University
                 if off_day:
                     if 9 <= hour <= 18:
-                        frac = 0.04 + 0.11 * s  # Weekend library/labs: 4% - 15%
+                        frac = 0.04 + 0.11 * s
                     else:
                         frac = 0.0 if s < 0.80 else 0.02
                 else:
                     if 9 <= hour <= 16:
-                        frac = 0.60 + 0.35 * s  # Main lecture/lab hours: 60% - 95%
+                        frac = 0.60 + 0.35 * s
                     elif hour in (8, 17):
-                        frac = 0.35 + 0.30 * s  # 35% - 65%
+                        frac = 0.35 + 0.30 * s
                     elif 18 <= hour <= 21:
-                        frac = 0.18 + 0.25 * s  # Evening classes / study halls: 18% - 43%
+                        frac = 0.18 + 0.25 * s
                     else:
                         frac = 0.0 if s < 0.75 else 0.02
 
