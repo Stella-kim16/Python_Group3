@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, Dict, Iterable, Iterator, List, Optional
+from subsystem1.exceptions_subsystem1 import DataProcessingError
 
 
 class StreamProcessor(ABC):
@@ -62,51 +63,76 @@ class StreamPipeline(StreamProcessor):
 
     def bind_source(self, source: Iterable[Any]) -> "StreamPipeline":
         """Bind an iterable or stream source to this pipeline for iterator consumption."""
-        self._source = source
-        self._iterator = None
-        return self
+        try:
+            self._source = source
+            self._iterator = None
+            return self
+        except Exception as e:
+            raise DataProcessingError(f"Failed to bind source to StreamPipeline: {e}") from e
 
     def process(self, data: Any) -> Any:
         """
         Pass an event (or DataFrame) sequentially through all composed processors.
         If any filter stage returns None, short-circuit and drop the event.
         """
-        current = data
-        for processor in self.processors:
-            if current is None:
-                return None
-            current = processor.process(current)
-        return current
+        try:
+            current = data
+            for processor in self.processors:
+                if current is None:
+                    return None
+                current = processor.process(current)
+            return current
+        except Exception as e:
+            if isinstance(e, DataProcessingError):
+                raise
+            raise DataProcessingError(f"Error during StreamPipeline process execution: {e}") from e
 
     def process_stream(self, stream: Iterable[Any]) -> Iterator[Any]:
         """
         Generator that lazily consumes an input stream on the fly and yields
         only valid, transformed events (skipping filtered-out None events).
         """
-        for event in stream:
-            result = self.process(event)
-            if result is not None:
-                yield result
+        try:
+            for event in stream:
+                result = self.process(event)
+                if result is not None:
+                    yield result
+        except Exception as e:
+            if isinstance(e, DataProcessingError):
+                raise
+            raise DataProcessingError(f"Error processing stream generator: {e}") from e
 
     def __iter__(self) -> "StreamPipeline":
-        """Initialize stream iteration over the bound source."""
-        if self._source is None:
-            raise ValueError("No stream source bound to StreamPipeline. Call `bind_source(stream)` first.")
-        self._iterator = iter(self._source)
-        return self
+        """Initialize stream iteration over the bound source safely."""
+        try:
+            if self._source is None:
+                raise ValueError("No stream source bound to StreamPipeline. Call `bind_source(stream)` first.")
+            self._iterator = iter(self._source)
+            return self
+        except Exception as e:
+            if isinstance(e, DataProcessingError):
+                raise
+            raise DataProcessingError(f"Failed to initialize stream pipeline iteration: {e}") from e
 
     def __next__(self) -> Any:
         """
         Fetch and process the next valid event from the bound stream source,
-        automatically skipping events filtered out (where `process` returns None).
+        automatically skipping events filtered out.
         """
-        if self._iterator is None:
-            raise StopIteration
-        while True:
-            raw_event = next(self._iterator)  # Raises StopIteration when exhausted
-            processed = self.process(raw_event)
-            if processed is not None:
-                return processed
+        try:
+            if self._iterator is None:
+                raise StopIteration
+            while True:
+                raw_event = next(self._iterator)  # Raises StopIteration when exhausted
+                processed = self.process(raw_event)
+                if processed is not None:
+                    return processed
+        except StopIteration:
+            raise
+        except Exception as e:
+            if isinstance(e, DataProcessingError):
+                raise
+            raise DataProcessingError(f"Error fetching next event in stream pipeline: {e}") from e
 
 
 @dataclass
@@ -146,27 +172,33 @@ class EnergyLog:
     is_anomaly: bool = False
 
     def validate_data_types(self) -> bool:
-        """Validate domain constraints and data types for this telemetry record."""
-        if not isinstance(self.timestamp, datetime):
-            return False
-        if not isinstance(self.occupancy, int) or self.occupancy < 0:
-            return False
-        if self.area_sqft <= 0:
-            return False
-        if not (0.0 <= self.humidity <= 100.0):
-            return False
-        if not (0.0 <= self.renewable_energy_pct <= 100.0):
-            return False
-        if self.hvac_usage not in ("On", "Off") or self.lighting_usage not in ("On", "Off"):
-            return False
-        if self.holiday not in ("Yes", "No"):
-            return False
-        if self.energy_consumption_kwh < 0:
-            return False
-        return True
+        """Validate domain constraints and data types for this telemetry record safely."""
+        try:
+            if not isinstance(self.timestamp, datetime):
+                return False
+            if not isinstance(self.occupancy, int) or self.occupancy < 0:
+                return False
+            if self.area_sqft <= 0:
+                return False
+            if not (0.0 <= self.humidity <= 100.0):
+                return False
+            if not (0.0 <= self.renewable_energy_pct <= 100.0):
+                return False
+            if self.hvac_usage not in ("On", "Off") or self.lighting_usage not in ("On", "Off"):
+                return False
+            if self.holiday not in ("Yes", "No"):
+                return False
+            if self.energy_consumption_kwh < 0:
+                return False
+            return True
+        except Exception as e:
+            raise DataProcessingError(f"Error validating EnergyLog data types: {e}") from e
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize the energy log record into a JSON-compatible dictionary."""
-        data = asdict(self)
-        data["timestamp"] = self.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-        return data
+        """Serialize the energy log record into a JSON-compatible dictionary safely."""
+        try:
+            data = asdict(self)
+            data["timestamp"] = self.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            return data
+        except Exception as e:
+            raise DataProcessingError(f"Error serializing EnergyLog to dictionary: {e}") from e
