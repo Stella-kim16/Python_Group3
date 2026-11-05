@@ -77,9 +77,7 @@ class SavingsAdvisor:
     """Estimate how much money each saving scenario would save per building."""
 
     def __init__(self, model, raw_df: pd.DataFrame, scenarios: list[SavingScenario] | None = None):
-        # model     : train() 이 끝난 AIforecast 객체
-        # raw_df    : pd.read_csv() 로 읽은 원본 CSV (시각 / 빌딩 이름 / 단가)
-        # scenarios : 계산할 절약 방법 목록 (없으면 HVAC + 조명)
+      
         if not model.is_trained:
             raise RuntimeError("Train the AIforecast model before creating SavingsAdvisor.")
 
