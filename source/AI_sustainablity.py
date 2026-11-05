@@ -3,24 +3,15 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-# 빌딩별 지속가능성 점수 (0~100, 높을수록 좋음)
-# 세부 점수 4개를 가중 평균해서 총점을 만든다
-#   waste      : 빈 방에서 HVAC / 조명이 켜져 낭비된 에너지 비율 (모델로 추정)
-#   renewable  : 사용량 중 재생에너지 비율
-#   peak       : 비싼(피크) 요금 시간대에 쓴 에너지 비율
-#   efficiency : 면적당 사용량을 같은 유형 빌딩과 비교 (= Current Efficiency Score)
 
-# ---------------------------------------------------------------
-# 설정값 — 팀에서 바꿀 수 있는 기준
-# ---------------------------------------------------------------
-WEIGHTS = {"waste": 0.4, "renewable": 0.3, "peak": 0.2, "efficiency": 0.1}  # 합 = 1
-WASTE_LIMIT = 0.10        # 낭비 비율이 10% 이상이면 waste 점수 0점
-RENEWABLE_TARGET = 0.50   # 재생에너지 비율 50% 이상이면 renewable 점수 100점
-PEAK_LIMIT = 0.50         # 피크 시간 사용 비율이 50% 이상이면 peak 점수 0점
+WEIGHTS = {"waste": 0.4, "renewable": 0.3, "peak": 0.2, "efficiency": 0.1} 
+WASTE_LIMIT = 0.10        
+RENEWABLE_TARGET = 0.50   
+PEAK_LIMIT = 0.50         
 
 BUILDING_PREFIX = "Bld_"
 OCCUPANCY_COL = "Occupancy"
-SWITCH_OFF_COLS = ["HVACUsage", "LightingUsage"]   # 빈 방이면 꺼야 하는 기기
+SWITCH_OFF_COLS = ["HVACUsage", "LightingUsage"]  
 RAW_COLS = ["building_id", "building_type", "EnergyConsumption", "RenewableEnergy",
             "cost_per_kwh", "SquareFootage", "carbon_footprint_kg", "Timestamp"]
 
@@ -30,10 +21,10 @@ class ScoreResult:
     """Sustainability score of one building with the numbers behind it."""
     building_id: str
     building_type: str
-    total_score: float                 # 0~100 (인터페이스의 큰 숫자, 예: 74/100)
-    efficiency_score: float            # 0~100 (Current Efficiency 게이지)
-    sub_scores: dict = field(default_factory=dict)   # waste / renewable / peak / efficiency 점수
-    details: dict = field(default_factory=dict)      # 점수 계산에 쓴 실제 수치
+    total_score: float                 
+    efficiency_score: float            
+    sub_scores: dict = field(default_factory=dict)   
+    details: dict = field(default_factory=dict)     
 
 
 def _clip(value: float) -> float:
@@ -45,9 +36,7 @@ class SustainabilityScorer:
     """Score how sustainably each building uses energy."""
 
     def __init__(self, model, raw_df: pd.DataFrame, weights: dict | None = None):
-        # model   : train() 이 끝난 AIforecast 객체 (낭비 kWh 추정에 사용)
-        # raw_df  : pd.read_csv() 로 읽은 원본 CSV (실측 사용량 / 재생에너지 / 단가 / 면적)
-        # weights : 세부 점수 가중치 (없으면 WEIGHTS 사용)
+        
         if not model.is_trained:
             raise RuntimeError("Train the AIforecast model before creating SustainabilityScorer.")
         missing = [c for c in RAW_COLS if c not in raw_df.columns]
@@ -60,37 +49,32 @@ class SustainabilityScorer:
         if abs(sum(self.weights.values()) - 1) > 1e-6:
             raise ValueError("Weights must add up to 1.")
 
-        self.history_X = model.history_X()     # 모델이 본 입력 (이상치 제외)
+        self.history_X = model.history_X()   
         self.building_cols = [c for c in self.history_X.columns if c.startswith(BUILDING_PREFIX)]
         if not self.building_cols:
             raise RuntimeError("No 'Bld_' columns found — one-hot encode 'building_id' first.")
 
-        # 피크 요금 = 가장 싼 단가보다 비싼 시간 (이 데이터: 0.15 € = 기본, 0.30 € = 피크)
         self.offpeak_price = self.raw["cost_per_kwh"].min()
 
-        # 같은 유형(Home / Office / University) 빌딩의 면적당 사용량 중 가장 좋은 값
+   
         intensity = (self.raw["EnergyConsumption"] / self.raw["SquareFootage"])
         per_building = intensity.groupby(self.raw["building_id"]).mean()
         types = self.raw.groupby("building_id")["building_type"].first()
-        self.intensity = per_building                               # 빌딩별 kWh / sqft
-        self.best_in_type = per_building.groupby(types).min()       # 유형별 최솟값
+        self.intensity = per_building                            
+        self.best_in_type = per_building.groupby(types).min()      
         self.types = types
 
-    # -----------------------------------------------------------
-    # 빌딩 목록
-    # -----------------------------------------------------------
+ 
     def buildings(self) -> list[str]:
         return sorted(c[len(BUILDING_PREFIX):] for c in self.building_cols)
 
-    # -----------------------------------------------------------
-    # 세부 점수 계산
-    # -----------------------------------------------------------
+
     def _waste(self, building_id: str) -> tuple[float, dict]:
         """Model-estimated share of energy that would be saved by switching devices off in empty rooms."""
         hist = self.history_X[self.history_X[f"{BUILDING_PREFIX}{building_id}"] == 1]
-        base_kwh = self.model.predict(hist)                    # 지금 상태 그대로
+        base_kwh = self.model.predict(hist)                 
 
-        no_waste = hist.copy()                                 # 빈 방이면 HVAC / 조명 Off
+        no_waste = hist.copy()                               
         empty = no_waste[OCCUPANCY_COL] == 0
         cols = [c for c in SWITCH_OFF_COLS if c in no_waste.columns]
         wasted_hours = int((empty & (no_waste[cols] == 1).any(axis=1)).sum())
@@ -118,14 +102,12 @@ class SustainabilityScorer:
         best = self.best_in_type[self.types[building_id]]
         return _clip(100 * best / own), {"kWh_per_1000_sqft": round(float(own * 1000), 2)}
 
-    # -----------------------------------------------------------
-    # 빌딩 하나 점수
-    # -----------------------------------------------------------
+
     def score_building(self, building_id: str) -> ScoreResult:
         if f"{BUILDING_PREFIX}{building_id}" not in self.building_cols:
             raise ValueError(f"Unknown building '{building_id}'. Available: {self.buildings()}")
 
-        rows = self.raw[self.raw["building_id"] == building_id]   # 이 빌딩의 실측 데이터
+        rows = self.raw[self.raw["building_id"] == building_id]
 
         waste, d1 = self._waste(building_id)
         renewable, d2 = self._renewable(rows)
@@ -149,9 +131,6 @@ class SustainabilityScorer:
             details=details,
         )
 
-    # -----------------------------------------------------------
-    # 빌딩 전체 점수
-    # -----------------------------------------------------------
     def score_all(self) -> dict[str, ScoreResult]:
         """{building_id: ScoreResult} for every building."""
         results = {}
