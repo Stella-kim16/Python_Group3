@@ -23,6 +23,7 @@ The aim of this work is to learn how to handle error in your application and tes
 - Subsystem 1: Custom exceptions (`DataIngestionError`, `DataProcessingError`) integrated into ingestion, database persistence, feature engineering, and models.
 - Subsystem 2: Custom exceptions (`ModelTrainingError`, `ForecastError`, `ModelEvaluationError`) integrated into AI modeling, forecasting, data processing, and evaluation.
 - Subsystem 3: Scenario generation, optimisation, and visualisation error handling.
+- Test cases can be found in the individual files inside the tests folder. These are separated by subsystem
 
 
 ## 6. Video link
