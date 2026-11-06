@@ -27,3 +27,4 @@ The aim of this work is to learn how to create a simple Django or Flask project 
 
 
 ## 6. Video link
+https://drive.google.com/file/d/1RpeP-izD6tMWSf05Vf9csXykcGw3T41l/view?usp=drive_link
