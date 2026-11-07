@@ -69,11 +69,8 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Project-specific outputs, trained models, or local databases
+# Project-specific outputs or trained models
 *.pkl
-*.db
 __pycache__/
 *.pyc
 .venv/
-*.pkl
-*.db
