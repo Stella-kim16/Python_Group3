@@ -57,5 +57,5 @@ Generated automatically by `DatabaseManager` after running the pipeline:
 ---
 
 ## 6. Video link
-- 
+- https://drive.google.com/file/d/1CXTnm7quibNwHVZBLlYZxje3-YZb-Zqz/view?usp=sharing
 
