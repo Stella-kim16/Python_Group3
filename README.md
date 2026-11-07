@@ -19,6 +19,8 @@
 ### 2. UML
 **Subsystem 1:  Real-Time Energy Monitoring & Data Management**
 
+<img width="700" height="624" alt="Subsystem 1 class diagram" src="https://github.com/Stella-kim16/Python_Group3/blob/feature/subsystem1/subsystem1_class_diagram.png?raw=true" />
+
 
 **Subsystem 2: AI Modelling & Prediction**
 
