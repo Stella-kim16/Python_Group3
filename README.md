@@ -22,7 +22,7 @@
 
 **Subsystem 2: AI Modelling & Prediction**
 
-<img width="700" height="600" alt="class_diagram" src="https://github.com/user-attachments/assets/3ab5aaf8-bf6a-465b-bb5e-dae699ac02bf" />
+<img width="700" height="754" alt="Subsystem 2 class diagram" src="https://github.com/Stella-kim16/Python_Group3/blob/feature/subsystem2/subsystem2_class_diagram.png?raw=true" />
 
 
 
